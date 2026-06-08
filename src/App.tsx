@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useRef, type ChangeEvent } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import {
   RefreshCw,
@@ -14,6 +14,11 @@ import {
   Coins,
   BookOpen,
   X,
+  TrendingUp,
+  TrendingDown,
+  Cloud,
+  Download,
+  Upload,
 } from 'lucide-react';
 import { fetchWorldGold } from './lib/clientData';
 
@@ -110,6 +115,102 @@ export default function App() {
     const avgPrice = totalQty > 0 ? totalMoney / totalQty : 0;
     return { totalQty, totalMoney, avgPrice, count: entries.length };
   }, [entries]);
+
+  // Lãi/lỗ tạm tính: so giá vốn trung bình với giá vàng thế giới quy đổi
+  const pnl = useMemo(() => {
+    if (summary.totalQty <= 0 || convertedChiVnd <= 0) return null;
+    const currentValue = summary.totalQty * convertedChiVnd; // giá trị hiện tại
+    const diff = currentValue - summary.totalMoney; // tổng lãi/lỗ
+    const pct =
+      summary.avgPrice > 0
+        ? ((convertedChiVnd - summary.avgPrice) / summary.avgPrice) * 100
+        : 0;
+    return {
+      currentValue,
+      diff,
+      pct,
+      perChi: convertedChiVnd - summary.avgPrice,
+      isProfit: diff >= 0,
+    };
+  }, [summary, convertedChiVnd]);
+
+  // Phát hiện thiết bị Apple (iOS / iPadOS / macOS) để bật sao lưu iCloud Drive
+  const isApple = useMemo(() => {
+    if (typeof navigator === 'undefined') return false;
+    const ua = navigator.userAgent || '';
+    const platform = navigator.platform || '';
+    const iOS =
+      /iPad|iPhone|iPod/.test(ua) ||
+      (platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+    const mac = /Mac/.test(platform) || /Mac OS X/.test(ua);
+    return iOS || mac;
+  }, []);
+
+  const restoreInputRef = useRef<HTMLInputElement>(null);
+
+  // Sao lưu nhật ký ra file JSON. Trên iOS/Mac sẽ mở bảng chia sẻ để chọn
+  // "Lưu vào Tệp" → iCloud Drive (sau đó hệ điều hành tự đồng bộ iCloud).
+  const handleBackup = async () => {
+    const data = JSON.stringify(entries, null, 2);
+    const blob = new Blob([data], { type: 'application/json' });
+    const fileName = 'nhat-ky-mua-vang.json';
+    const file = new File([blob], fileName, { type: 'application/json' });
+
+    if (
+      typeof navigator !== 'undefined' &&
+      navigator.canShare &&
+      navigator.canShare({ files: [file] })
+    ) {
+      try {
+        await navigator.share({ files: [file], title: 'Nhật ký mua vàng' });
+        return;
+      } catch {
+        return; // người dùng huỷ
+      }
+    }
+
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = fileName;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  };
+
+  // Khôi phục từ file (chọn từ iCloud Drive trong trình chọn tệp).
+  const handleRestore = (e: ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      try {
+        const parsed = JSON.parse(String(reader.result));
+        if (!Array.isArray(parsed)) throw new Error('format');
+        const restored: JournalEntry[] = parsed
+          .filter(
+            (x: any) =>
+              x &&
+              typeof x.quantity === 'number' &&
+              typeof x.price === 'number'
+          )
+          .map((x: any, i: number) => ({
+            id: String(x.id ?? `${Date.now()}-${i}`),
+            quantity: x.quantity,
+            price: x.price,
+            date: String(x.date ?? new Date().toLocaleDateString('vi-VN')),
+            createdAt: Number(x.createdAt ?? Date.now()),
+          }));
+        setEntries(restored);
+        resetForm();
+      } catch {
+        window.alert('Tệp không hợp lệ. Vui lòng chọn file sao lưu .json đúng.');
+      }
+    };
+    reader.readAsText(file);
+    e.target.value = '';
+  };
 
   const resetForm = () => {
     setQty('');
@@ -376,6 +477,85 @@ export default function App() {
           </div>
         </div>
 
+        {/* Lãi / Lỗ tạm tính theo giá vàng thế giới */}
+        {pnl && (
+          <motion.div
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            className={`rounded-3xl border p-6 shadow-sm flex flex-col gap-4 ${
+              pnl.isProfit
+                ? 'bg-emerald-50 border-emerald-200'
+                : 'bg-rose-50 border-rose-200'
+            }`}
+          >
+            <div className="flex items-center justify-between gap-3 flex-wrap">
+              <div>
+                <span
+                  className={`text-[10px] px-2 py-0.5 rounded font-bold uppercase tracking-widest inline-flex items-center gap-1 ${
+                    pnl.isProfit
+                      ? 'bg-emerald-100 text-emerald-700'
+                      : 'bg-rose-100 text-rose-700'
+                  }`}
+                >
+                  {pnl.isProfit ? (
+                    <TrendingUp className="w-3 h-3" />
+                  ) : (
+                    <TrendingDown className="w-3 h-3" />
+                  )}
+                  {pnl.isProfit ? 'Đang Lãi' : 'Đang Lỗ'}
+                </span>
+                <h3 className="text-lg font-extrabold text-slate-800 mt-1">
+                  Chênh Lệch Lãi / Lỗ
+                </h3>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  So giá vốn TB ({fmtVnd(summary.avgPrice)}đ/chỉ) với giá vàng
+                  thế giới quy đổi ({fmtVnd(convertedChiVnd)}đ/chỉ).
+                </p>
+              </div>
+              <div className="text-right">
+                <div
+                  className={`text-3xl font-black font-mono ${
+                    pnl.isProfit ? 'text-emerald-600' : 'text-rose-600'
+                  }`}
+                >
+                  {pnl.isProfit ? '+' : '−'}
+                  {fmtVnd(Math.abs(pnl.diff))}đ
+                </div>
+                <div
+                  className={`text-sm font-bold font-mono ${
+                    pnl.isProfit ? 'text-emerald-600' : 'text-rose-600'
+                  }`}
+                >
+                  {pnl.isProfit ? '+' : '−'}
+                  {Math.abs(pnl.pct).toLocaleString('vi-VN', {
+                    maximumFractionDigits: 2,
+                  })}
+                  %
+                </div>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-3">
+              <div className="bg-white/60 rounded-2xl px-4 py-3 border border-white">
+                <span className="text-[10px] text-slate-400 font-bold uppercase">
+                  Giá trị hiện tại
+                </span>
+                <div className="font-mono font-black text-slate-800 text-base">
+                  {fmtVnd(pnl.currentValue)}đ
+                </div>
+              </div>
+              <div className="bg-white/60 rounded-2xl px-4 py-3 border border-white">
+                <span className="text-[10px] text-slate-400 font-bold uppercase">
+                  Vốn đã bỏ ra
+                </span>
+                <div className="font-mono font-black text-slate-800 text-base">
+                  {fmtVnd(summary.totalMoney)}đ
+                </div>
+              </div>
+            </div>
+          </motion.div>
+        )}
+
         {/* Danh sách nhật ký */}
         <motion.div
           initial={{ opacity: 0, scale: 0.98 }}
@@ -456,6 +636,50 @@ export default function App() {
             </ul>
           )}
         </motion.div>
+
+        {/* Sao lưu iCloud Drive — chỉ hiện trên thiết bị Apple */}
+        {isApple && (
+          <motion.div
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="bg-white rounded-3xl border border-slate-200 p-6 shadow-sm flex flex-col gap-4"
+          >
+            <div className="flex items-center gap-2">
+              <Cloud className="w-5 h-5 text-sky-500" />
+              <h3 className="font-extrabold text-slate-900 text-base">
+                Sao lưu iCloud (iPhone / iPad / Mac)
+              </h3>
+            </div>
+            <p className="text-xs text-slate-500 leading-relaxed">
+              Nhấn <strong>Sao lưu</strong> rồi chọn{' '}
+              <strong>“Lưu vào Tệp → iCloud Drive”</strong>. iCloud sẽ tự đồng bộ
+              file này sang các thiết bị Apple khác của bạn. Khi cần, nhấn{' '}
+              <strong>Khôi phục</strong> và chọn lại file đó từ iCloud Drive.
+            </p>
+            <div className="flex items-center gap-3">
+              <button
+                onClick={handleBackup}
+                disabled={entries.length === 0}
+                className="flex-1 flex items-center justify-center gap-2 px-4 py-3 bg-sky-500 hover:bg-sky-600 text-white rounded-xl text-sm font-bold transition-all shadow-md shadow-sky-100 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                <Upload className="w-4 h-4" /> Sao lưu vào iCloud
+              </button>
+              <button
+                onClick={() => restoreInputRef.current?.click()}
+                className="flex-1 flex items-center justify-center gap-2 px-4 py-3 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-sm font-bold transition-all cursor-pointer"
+              >
+                <Download className="w-4 h-4" /> Khôi phục từ iCloud
+              </button>
+              <input
+                ref={restoreInputRef}
+                type="file"
+                accept="application/json,.json"
+                onChange={handleRestore}
+                className="hidden"
+              />
+            </div>
+          </motion.div>
+        )}
       </main>
 
       {/* Footer */}
