@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useRef, type ChangeEvent } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import {
   RefreshCw,
@@ -16,8 +16,6 @@ import {
   X,
   TrendingUp,
   TrendingDown,
-  Download,
-  Upload,
 } from 'lucide-react';
 import { fetchWorldGold } from './lib/clientData';
 
@@ -132,72 +130,6 @@ export default function App() {
       isProfit: diff >= 0,
     };
   }, [summary, convertedChiVnd]);
-
-  const restoreInputRef = useRef<HTMLInputElement>(null);
-
-  // Sao lưu nhật ký ra file JSON. Trên iOS/Mac sẽ mở bảng chia sẻ để chọn nơi
-  // lưu (vd iCloud Drive / Tệp); các nền tảng khác sẽ tải file xuống.
-  const handleBackup = async () => {
-    const data = JSON.stringify(entries, null, 2);
-    const blob = new Blob([data], { type: 'application/json' });
-    const fileName = 'nhat-ky-mua-vang.json';
-    const file = new File([blob], fileName, { type: 'application/json' });
-
-    if (
-      typeof navigator !== 'undefined' &&
-      navigator.canShare &&
-      navigator.canShare({ files: [file] })
-    ) {
-      try {
-        await navigator.share({ files: [file], title: 'Nhật ký mua vàng' });
-        return;
-      } catch {
-        return; // người dùng huỷ
-      }
-    }
-
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = fileName;
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    URL.revokeObjectURL(url);
-  };
-
-  // Khôi phục từ file (chọn từ iCloud Drive trong trình chọn tệp).
-  const handleRestore = (e: ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    const reader = new FileReader();
-    reader.onload = () => {
-      try {
-        const parsed = JSON.parse(String(reader.result));
-        if (!Array.isArray(parsed)) throw new Error('format');
-        const restored: JournalEntry[] = parsed
-          .filter(
-            (x: any) =>
-              x &&
-              typeof x.quantity === 'number' &&
-              typeof x.price === 'number'
-          )
-          .map((x: any, i: number) => ({
-            id: String(x.id ?? `${Date.now()}-${i}`),
-            quantity: x.quantity,
-            price: x.price,
-            date: String(x.date ?? new Date().toLocaleDateString('vi-VN')),
-            createdAt: Number(x.createdAt ?? Date.now()),
-          }));
-        setEntries(restored);
-        resetForm();
-      } catch {
-        window.alert('Tệp không hợp lệ. Vui lòng chọn file sao lưu .json đúng.');
-      }
-    };
-    reader.readAsText(file);
-    e.target.value = '';
-  };
 
   const resetForm = () => {
     setQty('');
@@ -624,46 +556,19 @@ export default function App() {
           )}
         </motion.div>
 
-        {/* Sao lưu / khôi phục dữ liệu (tệp .json) */}
+        {/* Lưu ý giữ dữ liệu */}
         <motion.div
           initial={{ opacity: 0, y: 10 }}
           animate={{ opacity: 1, y: 0 }}
-          className="bg-white rounded-3xl border border-slate-200 p-6 shadow-sm flex flex-col gap-4"
+          className="bg-rose-50 border border-rose-100 rounded-3xl p-5 flex items-start gap-3"
         >
-          <div className="flex items-center gap-2">
-            <Upload className="w-5 h-5 text-sky-500" />
-            <h3 className="font-extrabold text-slate-900 text-base">
-              Sao lưu & Khôi phục
-            </h3>
-          </div>
-          <p className="text-xs text-slate-500 leading-relaxed">
-            Nhật ký được lưu sẵn trên trình duyệt này. Nhấn <strong>Sao lưu</strong>{' '}
-            để xuất ra một tệp <code className="text-slate-600">.json</code> (có thể
-            chọn lưu vào Tệp / iCloud Drive / Google Drive…), và{' '}
-            <strong>Khôi phục</strong> để nạp lại tệp đó trên máy khác.
+          <Heart className="w-5 h-5 text-rose-500 fill-rose-500 shrink-0 mt-0.5" />
+          <p className="text-xs text-rose-700 leading-relaxed">
+            <strong>Lưu ý nhỏ nè ❤️</strong> Nhật ký được lưu ngay trên trình duyệt
+            của bạn. Vì vậy <strong>đừng xóa dữ liệu duyệt web</strong> (lịch sử /
+            cache) và lưu ý khi <strong>đổi máy hoặc đổi trình duyệt</strong> — nếu
+            không bạn có thể bị mất toàn bộ nhật ký đã ghi. Hãy giữ gìn cẩn thận nha!
           </p>
-          <div className="flex items-center gap-3">
-            <button
-              onClick={handleBackup}
-              disabled={entries.length === 0}
-              className="flex-1 flex items-center justify-center gap-2 px-4 py-3 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-sm font-bold transition-all cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
-            >
-              <Upload className="w-4 h-4" /> Sao lưu
-            </button>
-            <button
-              onClick={() => restoreInputRef.current?.click()}
-              className="flex-1 flex items-center justify-center gap-2 px-4 py-3 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-sm font-bold transition-all cursor-pointer"
-            >
-              <Download className="w-4 h-4" /> Khôi phục
-            </button>
-            <input
-              ref={restoreInputRef}
-              type="file"
-              accept="application/json,.json"
-              onChange={handleRestore}
-              className="hidden"
-            />
-          </div>
         </motion.div>
       </main>
 
