@@ -9,6 +9,7 @@ import {
   TrendingUp,
   Info
 } from 'lucide-react';
+import { fetchGoldTable, fetchWorldGold } from './lib/clientData';
 
 export default function App() {
   const [goldTable, setGoldTable] = useState<string[][]>([]);
@@ -24,10 +25,9 @@ export default function App() {
     else setIsRefreshing(true);
     
     try {
-      // 1. Fetch scraped Kim Mon table
-      const goldRes = await fetch('/api/gold');
-      const goldData = await goldRes.json();
-      if (goldData && goldData.success && goldData.table) {
+      // 1. Fetch scraped Kim Mon table (client-side, works on static hosting)
+      const goldData = await fetchGoldTable();
+      if (goldData && goldData.table) {
         setGoldTable(goldData.table);
         setIsFallback(!!goldData.isFallback);
       } else {
@@ -35,8 +35,7 @@ export default function App() {
       }
 
       // 2. Fetch world gold and exchange rates
-      const worldRes = await fetch('/api/world-gold');
-      const worldData = await worldRes.json();
+      const worldData = await fetchWorldGold();
       if (worldData) {
         setWorldGold(worldData);
       }
