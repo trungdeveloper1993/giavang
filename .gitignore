@@ -6,3 +6,6 @@ coverage/
 *.log
 .env*
 !.env.example
+
+# Generated at build time by scripts/fetch-gold.mjs
+public/gold-data.json
