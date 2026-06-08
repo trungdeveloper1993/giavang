@@ -1,55 +1,79 @@
 import { useState, useEffect, useMemo } from 'react';
-import { motion } from 'motion/react';
+import { motion, AnimatePresence } from 'motion/react';
 import {
-  Coins,
   RefreshCw,
   Clock,
   Heart,
   Globe,
-  TrendingUp,
-  Info
+  Plus,
+  Save,
+  Pencil,
+  Trash2,
+  Wallet,
+  Scale,
+  Coins,
+  BookOpen,
+  X,
 } from 'lucide-react';
-import { fetchGoldTable, fetchWorldGold } from './lib/clientData';
+import { fetchWorldGold } from './lib/clientData';
+
+interface JournalEntry {
+  id: string;
+  quantity: number; // số chỉ
+  price: number; // giá mua tại thời điểm đó (VND / chỉ)
+  date: string; // ngày mua hiển thị
+  createdAt: number;
+}
+
+const STORAGE_KEY = 'gold-purchase-journal';
+
+const fmtVnd = (n: number) => Math.round(n).toLocaleString('vi-VN');
+const fmtQty = (n: number) =>
+  n.toLocaleString('vi-VN', { maximumFractionDigits: 3 });
 
 export default function App() {
-  const [goldTable, setGoldTable] = useState<string[][]>([]);
-  const [worldGold, setWorldGold] = useState<{ worldGoldUsd: number; usdVnd: number; worldGoldVndLuong: number } | null>(null);
+  const [worldGold, setWorldGold] = useState<{
+    worldGoldUsd: number;
+    usdVnd: number;
+    worldGoldVndLuong: number;
+  } | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
-  const [isFallback, setIsFallback] = useState(false);
   const [updatedTime, setUpdatedTime] = useState<string>('');
-  const [errorHeader, setErrorHeader] = useState<string>('');
+
+  // Nhật ký mua vàng (lưu trên trình duyệt)
+  const [entries, setEntries] = useState<JournalEntry[]>(() => {
+    try {
+      const raw = localStorage.getItem(STORAGE_KEY);
+      return raw ? (JSON.parse(raw) as JournalEntry[]) : [];
+    } catch {
+      return [];
+    }
+  });
+
+  // Form state
+  const [qty, setQty] = useState('');
+  const [price, setPrice] = useState('');
+  const [editingId, setEditingId] = useState<string | null>(null);
 
   const loadData = async (silent = false) => {
     if (!silent) setIsLoading(true);
     else setIsRefreshing(true);
-    
     try {
-      // 1. Fetch scraped Kim Mon table (client-side, works on static hosting)
-      const goldData = await fetchGoldTable();
-      if (goldData && goldData.table) {
-        setGoldTable(goldData.table);
-        setIsFallback(!!goldData.isFallback);
-      } else {
-        throw new Error("Could not fetch gold table data");
-      }
-
-      // 2. Fetch world gold and exchange rates
       const worldData = await fetchWorldGold();
-      if (worldData) {
-        setWorldGold(worldData);
-      }
-
+      if (worldData) setWorldGold(worldData);
       const now = new Date();
       setUpdatedTime(
-        now.toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit', second: '2-digit' }) + 
-        ' ' + 
-        now.toLocaleDateString('vi-VN')
+        now.toLocaleTimeString('vi-VN', {
+          hour: '2-digit',
+          minute: '2-digit',
+          second: '2-digit',
+        }) +
+          ' ' +
+          now.toLocaleDateString('vi-VN')
       );
-      setErrorHeader('');
-    } catch (err: any) {
+    } catch (err) {
       console.error(err);
-      setErrorHeader('Đang sử dụng dữ liệu tham chiếu ngoại tuyến.');
     } finally {
       setIsLoading(false);
       setIsRefreshing(false);
@@ -58,62 +82,81 @@ export default function App() {
 
   useEffect(() => {
     loadData();
-    const interval = setInterval(() => {
-      loadData(true);
-    }, 60000); // refresh every minute
-
+    const interval = setInterval(() => loadData(true), 60000);
     return () => clearInterval(interval);
   }, []);
 
-  // Split headers and rows
-  const tableHeaders = goldTable.length > 0 ? goldTable[0] : ["LOẠI VÀNG", "MUA VÀO", "BÁN RA"];
-  const tableRows = goldTable.length > 1 ? goldTable.slice(1) : [];
-
-  // Helper to parse price string (e.g., "13.600" -> 13.6 Million VND per chỉ)
-  const getPriceInMillionPerChi = (priceStr: string): number => {
-    if (!priceStr) return 0;
-    const cleaned = priceStr.replace(/[^0-9]/g, '');
-    if (!cleaned) return 0;
-    const numValue = parseInt(cleaned, 10);
-    if (numValue > 100000) {
-      return numValue / 1000000;
+  // Lưu nhật ký xuống localStorage mỗi khi thay đổi
+  useEffect(() => {
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(entries));
+    } catch {
+      /* ignore quota errors */
     }
-    return numValue / 1000;
+  }, [entries]);
+
+  // Giá vàng thế giới quy đổi cho 1 chỉ (VND)
+  const convertedChiVnd = worldGold
+    ? Math.round((worldGold.worldGoldVndLuong / 10) * 1000000)
+    : 0;
+
+  const qtyNum = parseFloat(qty) || 0;
+  const priceNum = parseFloat(price) || 0;
+  const formAmount = qtyNum * priceNum;
+
+  const summary = useMemo(() => {
+    const totalQty = entries.reduce((s, e) => s + e.quantity, 0);
+    const totalMoney = entries.reduce((s, e) => s + e.quantity * e.price, 0);
+    const avgPrice = totalQty > 0 ? totalMoney / totalQty : 0;
+    return { totalQty, totalMoney, avgPrice, count: entries.length };
+  }, [entries]);
+
+  const resetForm = () => {
+    setQty('');
+    setPrice('');
+    setEditingId(null);
   };
 
-  // Find 9999 gold reference item
-  const vn9999Item = useMemo(() => {
-    if (tableRows.length === 0) return null;
-    const found = tableRows.find(row => row[0] && (row[0].includes('9999') || row[0].includes('24K')));
-    return found || tableRows[0];
-  }, [tableRows]);
+  const handleSave = () => {
+    if (qtyNum <= 0 || priceNum <= 0) return;
+    if (editingId) {
+      setEntries((prev) =>
+        prev.map((e) =>
+          e.id === editingId ? { ...e, quantity: qtyNum, price: priceNum } : e
+        )
+      );
+    } else {
+      const now = new Date();
+      const id =
+        typeof crypto !== 'undefined' && 'randomUUID' in crypto
+          ? crypto.randomUUID()
+          : String(now.getTime());
+      setEntries((prev) => [
+        {
+          id,
+          quantity: qtyNum,
+          price: priceNum,
+          date: now.toLocaleDateString('vi-VN'),
+          createdAt: now.getTime(),
+        },
+        ...prev,
+      ]);
+    }
+    resetForm();
+  };
 
-  // Compute premium analysis
-  const spreadAnalysis = useMemo(() => {
-    if (!worldGold || !vn9999Item) return null;
-    
-    const vnName = vn9999Item[0];
-    const vnBuyRaw = vn9999Item[1];
-    const vnSellRaw = vn9999Item[2];
-    
-    const vnBuyChi = getPriceInMillionPerChi(vnBuyRaw);
-    const vnSellChi = getPriceInMillionPerChi(vnSellRaw);
-    
-    // World gold per chỉ is worldGoldVndLuong / 10
-    const worldChi = worldGold.worldGoldVndLuong / 10;
-    
-    const buyDiff = vnBuyChi - worldChi;
-    const sellDiff = vnSellChi - worldChi;
-    
-    return {
-      vnName,
-      vnBuyChi,
-      vnSellChi,
-      worldChi,
-      buyDiff,
-      sellDiff
-    };
-  }, [worldGold, vn9999Item]);
+  const handleEdit = (entry: JournalEntry) => {
+    setEditingId(entry.id);
+    setQty(String(entry.quantity));
+    setPrice(String(entry.price));
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
+  const handleDelete = (id: string) => {
+    if (!window.confirm('Xóa mục nhật ký mua vàng này?')) return;
+    setEntries((prev) => prev.filter((e) => e.id !== id));
+    if (editingId === id) resetForm();
+  };
 
   return (
     <div className="min-h-screen bg-slate-50 text-slate-800 font-sans antialiased flex flex-col">
@@ -122,7 +165,7 @@ export default function App() {
         <div className="flex items-center gap-2">
           <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
           <span className="font-semibold tracking-wide uppercase text-slate-200">
-            {isFallback ? 'ĐỒNG BỘ THỜI GIAN THỰC ĐẠI LÝ' : 'ĐỒNG BỘ TRỰC TIẾP GIAVANGMAOTHIET.COM'}
+            NHẬT KÝ MUA VÀNG CÁ NHÂN
           </span>
         </div>
         <div className="flex items-center gap-4">
@@ -149,7 +192,7 @@ export default function App() {
               Tôi Yêu Vàng <span className="text-red-500">❤️</span>
             </h1>
             <p className="text-[10px] text-slate-400 font-bold uppercase mt-1 tracking-widest">
-              Hello, Trang web này tham khảo giá vàng miễn phí nhé {'<3'}
+              Nhật ký mua vàng & theo dõi giá vốn
             </p>
           </div>
         </div>
@@ -158,192 +201,274 @@ export default function App() {
           onClick={() => loadData()}
           disabled={isLoading || isRefreshing}
           className="flex items-center gap-2 px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold transition-all border border-slate-200 cursor-pointer disabled:opacity-50"
-          title="Tải lại bảng giá"
+          title="Cập nhật giá vàng thế giới"
         >
-          <RefreshCw className={`w-4 h-4 ${(isLoading || isRefreshing) ? 'animate-spin text-red-500' : ''}`} />
+          <RefreshCw
+            className={`w-4 h-4 ${
+              isLoading || isRefreshing ? 'animate-spin text-red-500' : ''
+            }`}
+          />
           <span>Làm mới</span>
         </button>
       </header>
 
       {/* Main Content Area */}
-      <main className="flex-1 p-4 sm:p-8 lg:p-12 max-w-5xl mx-auto w-full flex flex-col gap-8 justify-center">
-
-        {/* World Gold Converted Panel & Spread Analysis */}
+      <main className="flex-1 p-4 sm:p-8 lg:p-12 max-w-3xl mx-auto w-full flex flex-col gap-8">
+        {/* World Gold Converted Panel */}
         {worldGold && (
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            <motion.div 
-              initial={{ opacity: 0, y: 10 }}
-              animate={{ opacity: 1, y: 0 }}
-              className="bg-white rounded-3xl border border-slate-200 p-6 shadow-sm flex flex-col justify-between gap-6"
-            >
-              <div className="space-y-1 text-left">
-                <span className="text-[10px] bg-sky-50 text-sky-600 px-2 py-0.5 rounded font-bold uppercase tracking-widest inline-flex items-center gap-1">
-                  <Globe className="w-3 h-3" /> Tham Chiếu Vàng Thế Giới
-                </span>
-                <h2 className="text-lg font-extrabold text-slate-800 mt-1">
-                  Vàng Thế Giới Quy Đổi
-                </h2>
-                <p className="text-xs text-slate-500 leading-relaxed">
-                  Tính theo công thức: (Giá thế giới USD <strong className="text-slate-700">${worldGold.worldGoldUsd.toLocaleString('en-US')}/oz</strong> × tỷ giá <strong className="text-slate-700">{worldGold.usdVnd.toLocaleString('vi-VN')}đ</strong>) ÷ <strong className="text-sky-600 font-bold">0.83</strong>
-                </p>
-              </div>
+          <motion.div
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="bg-white rounded-3xl border border-slate-200 p-6 shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-5"
+          >
+            <div className="space-y-1 text-left">
+              <span className="text-[10px] bg-sky-50 text-sky-600 px-2 py-0.5 rounded font-bold uppercase tracking-widest inline-flex items-center gap-1">
+                <Globe className="w-3 h-3" /> Tham Chiếu Vàng Thế Giới
+              </span>
+              <h2 className="text-lg font-extrabold text-slate-800 mt-1">
+                Vàng Thế Giới Quy Đổi
+              </h2>
+              <p className="text-xs text-slate-500 leading-relaxed">
+                (Giá thế giới{' '}
+                <strong className="text-slate-700">
+                  ${worldGold.worldGoldUsd.toLocaleString('en-US')}/oz
+                </strong>{' '}
+                × tỷ giá{' '}
+                <strong className="text-slate-700">
+                  {worldGold.usdVnd.toLocaleString('vi-VN')}đ
+                </strong>
+                ) ÷ <strong className="text-sky-600 font-bold">0.83</strong>
+              </p>
+            </div>
 
-              <div className="flex flex-col items-start bg-slate-50 px-6 py-4 rounded-2xl border border-slate-100">
-                <span className="text-[10px] text-slate-400 uppercase font-black tracking-wider">Giá quy đổi (1 chỉ)</span>
-                <span className="text-2xl font-black text-slate-950 tracking-tight font-mono">
-                  {Math.round((worldGold.worldGoldVndLuong / 10) * 1000000).toLocaleString('vi-VN')} đ
-                </span>
-                <span className="text-[10px] text-sky-600 font-bold mt-1">
-                  Đồng bộ với bảng giá vàng Kim Môn
-                </span>
-              </div>
-            </motion.div>
-
-            {spreadAnalysis && (
-              <motion.div 
-                initial={{ opacity: 0, y: 10 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ delay: 0.05 }}
-                className="bg-white rounded-3xl border border-slate-200 p-6 shadow-sm flex flex-col justify-between gap-4"
+            <div className="flex flex-col items-start sm:items-end bg-slate-50 px-6 py-4 rounded-2xl border border-slate-100 shrink-0">
+              <span className="text-[10px] text-slate-400 uppercase font-black tracking-wider">
+                Giá quy đổi (1 chỉ)
+              </span>
+              <span className="text-2xl font-black text-slate-950 tracking-tight font-mono">
+                {fmtVnd(convertedChiVnd)} đ
+              </span>
+              <button
+                onClick={() => setPrice(String(convertedChiVnd))}
+                className="text-[10px] text-sky-600 font-bold mt-1 hover:underline cursor-pointer"
               >
-                <div className="space-y-1">
-                  <span className="text-[10px] bg-amber-50 text-amber-700 px-2 py-0.5 rounded font-bold uppercase tracking-widest inline-flex items-center gap-1">
-                    <TrendingUp className="w-3.5 h-3.5 text-amber-500" /> Sức Nóng Thị Trường
-                  </span>
-                  <h2 className="text-lg font-extrabold text-slate-800 mt-1">
-                    Chênh Lệch Vàng Nội - Ngoại
-                  </h2>
-                  <p className="text-xs text-slate-500 leading-relaxed">
-                    Mức cao hơn/thấp hơn của dòng vàng nguyên liệu Nhẫn 9999 ({spreadAnalysis.vnName.split(' ')[0]}) so với thế giới quy đổi.
-                  </p>
-                </div>
-
-                <div className="grid grid-cols-2 gap-3">
-                  <div className="bg-slate-50 px-4 py-3 rounded-2xl border border-slate-100 flex flex-col">
-                    <span className="text-[10px] text-slate-400 font-bold uppercase">Chiều Mua Vào</span>
-                    <span className={`text-sm lg:text-base font-extrabold font-mono mt-1 ${spreadAnalysis.buyDiff >= 0 ? "text-emerald-600" : "text-amber-600"}`}>
-                      {spreadAnalysis.buyDiff >= 0 ? "Cao hơn +" : "Thấp hơn "}{Math.round(Math.abs(spreadAnalysis.buyDiff) * 1000000).toLocaleString('vi-VN')}đ
-                    </span>
-                  </div>
-                  
-                  <div className="bg-slate-50 px-4 py-3 rounded-2xl border border-slate-100 flex flex-col">
-                    <span className="text-[10px] text-slate-400 font-bold uppercase">Chiều Bán Ra</span>
-                    <span className={`text-sm lg:text-base font-extrabold font-mono mt-1 ${spreadAnalysis.sellDiff >= 0 ? "text-red-500" : "text-amber-600"}`}>
-                      {spreadAnalysis.sellDiff >= 0 ? "Cao hơn +" : "Thấp hơn "}{Math.round(Math.abs(spreadAnalysis.sellDiff) * 1000000).toLocaleString('vi-VN')}đ
-                    </span>
-                  </div>
-                </div>
-              </motion.div>
-            )}
-          </div>
+                Dùng giá này để ghi nhật ký →
+              </button>
+            </div>
+          </motion.div>
         )}
 
-        {/* Main Golden Price Table Container */}
+        {/* Form ghi nhật ký */}
+        <motion.div
+          initial={{ opacity: 0, scale: 0.98 }}
+          animate={{ opacity: 1, scale: 1 }}
+          transition={{ delay: 0.05 }}
+          className="bg-white rounded-3xl border border-slate-200 shadow-md overflow-hidden"
+        >
+          <div className="p-6 border-b border-slate-100 bg-slate-50/50">
+            <h3 className="font-extrabold text-slate-900 text-lg flex items-center gap-2">
+              <Plus className="w-5 h-5 text-amber-500" />
+              {editingId ? 'Chỉnh Sửa Lần Mua' : 'Ghi Nhật Ký Mua Vàng'}
+            </h3>
+            <p className="text-xs text-slate-400 mt-0.5">
+              Nhập số lượng (chỉ) và giá vàng tại thời điểm mua.
+            </p>
+          </div>
+
+          <div className="p-6 flex flex-col gap-5">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div className="flex flex-col gap-1.5">
+                <label className="text-[11px] font-bold uppercase tracking-wider text-slate-500">
+                  Số lượng (chỉ)
+                </label>
+                <input
+                  type="number"
+                  inputMode="decimal"
+                  min="0"
+                  step="0.1"
+                  value={qty}
+                  onChange={(e) => setQty(e.target.value)}
+                  placeholder="Ví dụ: 2"
+                  className="w-full px-4 py-3 rounded-xl border border-slate-200 bg-slate-50 font-mono font-bold text-slate-800 focus:outline-none focus:ring-2 focus:ring-amber-400 focus:bg-white transition"
+                />
+              </div>
+              <div className="flex flex-col gap-1.5">
+                <label className="text-[11px] font-bold uppercase tracking-wider text-slate-500">
+                  Giá vàng (đ / chỉ)
+                </label>
+                <input
+                  type="number"
+                  inputMode="numeric"
+                  min="0"
+                  step="1000"
+                  value={price}
+                  onChange={(e) => setPrice(e.target.value)}
+                  placeholder="Ví dụ: 7500000"
+                  className="w-full px-4 py-3 rounded-xl border border-slate-200 bg-slate-50 font-mono font-bold text-slate-800 focus:outline-none focus:ring-2 focus:ring-amber-400 focus:bg-white transition"
+                />
+              </div>
+            </div>
+
+            {/* Thành tiền tạm tính */}
+            <div className="flex items-center justify-between bg-amber-50 border border-amber-100 rounded-2xl px-5 py-4">
+              <span className="text-xs font-bold uppercase tracking-wider text-amber-700">
+                Thành tiền
+              </span>
+              <span className="text-xl font-black font-mono text-amber-700">
+                {fmtVnd(formAmount)} đ
+              </span>
+            </div>
+
+            <div className="flex items-center gap-3">
+              <button
+                onClick={handleSave}
+                disabled={qtyNum <= 0 || priceNum <= 0}
+                className="flex-1 flex items-center justify-center gap-2 px-5 py-3 bg-red-500 hover:bg-red-600 text-white rounded-xl text-sm font-bold transition-all shadow-md shadow-red-100 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                <Save className="w-4 h-4" />
+                {editingId ? 'Cập nhật' : 'Lưu vào nhật ký'}
+              </button>
+              {editingId && (
+                <button
+                  onClick={resetForm}
+                  className="flex items-center justify-center gap-1.5 px-4 py-3 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-xl text-sm font-bold transition-all cursor-pointer"
+                >
+                  <X className="w-4 h-4" /> Hủy
+                </button>
+              )}
+            </div>
+          </div>
+        </motion.div>
+
+        {/* Tổng kết */}
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+          <div className="bg-white rounded-3xl border border-slate-200 p-5 shadow-sm flex flex-col gap-1">
+            <span className="text-[10px] text-slate-400 uppercase font-black tracking-wider flex items-center gap-1.5">
+              <Scale className="w-3.5 h-3.5 text-amber-500" /> Tổng số lượng
+            </span>
+            <span className="text-2xl font-black font-mono text-slate-900">
+              {fmtQty(summary.totalQty)}{' '}
+              <span className="text-sm font-bold text-slate-400">chỉ</span>
+            </span>
+            <span className="text-[11px] text-slate-400">
+              {summary.count} lần mua
+            </span>
+          </div>
+
+          <div className="bg-white rounded-3xl border border-slate-200 p-5 shadow-sm flex flex-col gap-1">
+            <span className="text-[10px] text-slate-400 uppercase font-black tracking-wider flex items-center gap-1.5">
+              <Coins className="w-3.5 h-3.5 text-amber-500" /> Giá vốn TB
+            </span>
+            <span className="text-2xl font-black font-mono text-slate-900">
+              {fmtVnd(summary.avgPrice)}
+            </span>
+            <span className="text-[11px] text-slate-400">đồng / chỉ</span>
+          </div>
+
+          <div className="bg-gradient-to-br from-red-500 to-red-600 rounded-3xl p-5 shadow-md shadow-red-100 flex flex-col gap-1 text-white">
+            <span className="text-[10px] uppercase font-black tracking-wider flex items-center gap-1.5 text-red-100">
+              <Wallet className="w-3.5 h-3.5" /> Tổng tiền đã mua
+            </span>
+            <span className="text-2xl font-black font-mono">
+              {fmtVnd(summary.totalMoney)}
+            </span>
+            <span className="text-[11px] text-red-100">đồng</span>
+          </div>
+        </div>
+
+        {/* Danh sách nhật ký */}
         <motion.div
           initial={{ opacity: 0, scale: 0.98 }}
           animate={{ opacity: 1, scale: 1 }}
           transition={{ delay: 0.1 }}
-          className="bg-white rounded-3xl border border-slate-200 shadow-md flex flex-col overflow-hidden"
+          className="bg-white rounded-3xl border border-slate-200 shadow-md overflow-hidden"
         >
-          {/* Header of Table Container */}
-          <div className="p-6 border-b border-slate-100 bg-slate-50/50 flex justify-between items-center flex-wrap gap-3">
-            <div>
-              <h3 className="font-extrabold text-slate-900 text-lg flex items-center gap-2">
-                <Coins className="w-5 h-5 text-amber-500" /> Bảng Giá Vàng Kim Môn
-              </h3>
-              <p className="text-xs text-slate-400 mt-0.5">
-                Nguồn trực tiếp từ đại lý vàng Kim Môn Hải Dương
-              </p>
-            </div>
-            
-            <div className="flex items-center gap-2">
-              <span className="text-[10px] bg-amber-100 text-amber-800 px-3 py-1.5 rounded-full font-bold uppercase tracking-wider">
-                Đơn vị: Nghìn đồng (k)
-              </span>
-            </div>
+          <div className="p-6 border-b border-slate-100 bg-slate-50/50 flex items-center justify-between">
+            <h3 className="font-extrabold text-slate-900 text-lg flex items-center gap-2">
+              <BookOpen className="w-5 h-5 text-amber-500" /> Nhật Ký Đã Mua
+            </h3>
+            <span className="text-[10px] bg-slate-100 text-slate-500 px-3 py-1.5 rounded-full font-bold uppercase tracking-wider">
+              {summary.count} mục
+            </span>
           </div>
 
-          {/* Scraped Content Visualizer */}
-          {isLoading ? (
-            <div className="py-24 flex flex-col items-center justify-center gap-3">
-              <RefreshCw className="w-8 h-8 text-red-500 animate-spin" />
-              <p className="text-slate-400 text-xs font-semibold">Đang cập nhật trực tuyến bảng giá vàng Kim Môn...</p>
+          {entries.length === 0 ? (
+            <div className="py-16 flex flex-col items-center justify-center gap-2 text-center px-6">
+              <BookOpen className="w-10 h-10 text-slate-200" />
+              <p className="text-slate-400 text-sm font-semibold">
+                Chưa có lần mua nào.
+              </p>
+              <p className="text-slate-300 text-xs">
+                Nhập số lượng và giá ở trên rồi nhấn "Lưu vào nhật ký".
+              </p>
             </div>
           ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full text-left my-2">
-                <thead>
-                  <tr className="border-b border-slate-100 text-slate-400 font-extrabold text-[11px] uppercase tracking-wider bg-slate-50/30">
-                    <th className="px-6 py-4 sm:px-8 text-left">{tableHeaders[0] || "LOẠI VÀNG"}</th>
-                    <th className="px-6 py-4 sm:px-8 text-right">{tableHeaders[1] || "MUA VÀO"}</th>
-                    <th className="px-6 py-4 sm:px-8 text-right text-red-500 font-black">{tableHeaders[2] || "BÁN RA"}</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100 text-sm">
-                  {tableRows.map((row, index) => {
-                    if (row.length < 2) return null;
-                    const rowBuyChi = getPriceInMillionPerChi(row[1]);
-                    const rowSellChi = getPriceInMillionPerChi(row[2]);
-                    
-                    const buyDiff = worldGold && rowBuyChi > 0 ? (rowBuyChi - (worldGold.worldGoldVndLuong / 10)) : null;
-                    const sellDiff = worldGold && rowSellChi > 0 ? (rowSellChi - (worldGold.worldGoldVndLuong / 10)) : null;
+            <ul className="divide-y divide-slate-100">
+              <AnimatePresence initial={false}>
+                {entries.map((entry) => (
+                  <motion.li
+                    key={entry.id}
+                    layout
+                    initial={{ opacity: 0, height: 0 }}
+                    animate={{ opacity: 1, height: 'auto' }}
+                    exit={{ opacity: 0, height: 0 }}
+                    className={`px-6 py-4 flex items-center justify-between gap-4 ${
+                      editingId === entry.id ? 'bg-amber-50/60' : ''
+                    }`}
+                  >
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="font-mono font-black text-slate-900 text-base">
+                          {fmtQty(entry.quantity)} chỉ
+                        </span>
+                        <span className="text-slate-300">×</span>
+                        <span className="font-mono font-bold text-slate-600 text-sm">
+                          {fmtVnd(entry.price)}đ
+                        </span>
+                      </div>
+                      <div className="text-[11px] text-slate-400 mt-0.5 flex items-center gap-1.5">
+                        <Clock className="w-3 h-3" /> {entry.date}
+                      </div>
+                    </div>
 
-                    return (
-                      <tr 
-                        key={index}
-                        className="hover:bg-amber-500/[0.02] transition-colors"
+                    <div className="flex items-center gap-3 shrink-0">
+                      <span className="font-mono font-black text-amber-700 text-base whitespace-nowrap">
+                        {fmtVnd(entry.quantity * entry.price)}đ
+                      </span>
+                      <button
+                        onClick={() => handleEdit(entry)}
+                        className="w-8 h-8 flex items-center justify-center rounded-lg bg-slate-100 hover:bg-sky-100 text-slate-500 hover:text-sky-600 transition cursor-pointer"
+                        title="Chỉnh sửa"
                       >
-                        {/* Name Column */}
-                        <td className="px-6 py-5 sm:px-8 font-semibold text-slate-800">
-                          <div className="flex items-center gap-3">
-                            <span className="w-2 h-2 rounded-full bg-amber-500 shrink-0" />
-                            <span>{row[0]}</span>
-                          </div>
-                        </td>
-                        {/* Buy Price Column */}
-                        <td className="px-6 py-5 sm:px-8 text-right font-mono font-bold text-slate-700 text-base">
-                          <div>{row[1] || "-"}</div>
-                          {buyDiff !== null && (
-                            <div className={`text-[10px] font-semibold font-sans mt-1 inline-block px-1.5 py-0.5 rounded ${buyDiff >= 0 ? 'text-emerald-700 bg-emerald-50' : 'text-amber-700 bg-amber-50'}`}>
-                              {buyDiff >= 0 ? '+' : ''}{Math.round(buyDiff * 1000000).toLocaleString('vi-VN')}đ/chỉ
-                            </div>
-                          )}
-                        </td>
-                        {/* Sell Price Column */}
-                        <td className="px-6 py-5 sm:px-8 text-right font-mono font-black text-red-600 text-lg">
-                          <div>{row[2] || "-"}</div>
-                          {sellDiff !== null && (
-                            <div className={`text-[10px] font-semibold font-sans mt-1 inline-block px-1.5 py-0.5 rounded ${sellDiff >= 0 ? 'text-red-700 bg-red-50' : 'text-amber-700 bg-amber-50'}`}>
-                              {sellDiff >= 0 ? '+' : ''}{Math.round(sellDiff * 1000000).toLocaleString('vi-VN')}đ/chỉ
-                            </div>
-                          )}
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-          )}
-
-          {/* Reference Notice Badge */}
-          {errorHeader && (
-            <div className="p-4 bg-red-50 border-t border-red-100 text-xs text-red-700 font-semibold flex items-center gap-2">
-              <Info className="w-4 h-4 text-red-500 shrink-0" />
-              <span>{errorHeader}</span>
-            </div>
+                        <Pencil className="w-4 h-4" />
+                      </button>
+                      <button
+                        onClick={() => handleDelete(entry.id)}
+                        className="w-8 h-8 flex items-center justify-center rounded-lg bg-slate-100 hover:bg-red-100 text-slate-500 hover:text-red-600 transition cursor-pointer"
+                        title="Xóa"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    </div>
+                  </motion.li>
+                ))}
+              </AnimatePresence>
+            </ul>
           )}
         </motion.div>
       </main>
 
-      {/* Simplified, elegant, static footer */}
+      {/* Footer */}
       <footer className="bg-white border-t border-slate-200 py-6 px-6 mt-auto text-slate-500 text-xs">
-        <div className="max-w-5xl mx-auto flex flex-col sm:flex-row justify-between items-center gap-4">
+        <div className="max-w-3xl mx-auto flex flex-col sm:flex-row justify-between items-center gap-4">
           <p className="font-semibold text-slate-600 flex items-center gap-1.5">
-            Tôi Yêu Vàng ❤️ <span className="text-slate-400 font-normal">© 2026. Tất cả dữ liệu đồng bộ tự động.</span>
+            Tôi Yêu Vàng ❤️{' '}
+            <span className="text-slate-400 font-normal">
+              © 2026. Nhật ký lưu ngay trên trình duyệt của bạn.
+            </span>
           </p>
           <p className="text-[11px] text-slate-400 text-center sm:text-right">
-            Thông tin niêm yết từ nguồn giavangmaothiet.com chỉ mang tính chất tham khảo.
+            Giá vàng thế giới chỉ mang tính chất tham khảo.
           </p>
         </div>
       </footer>
