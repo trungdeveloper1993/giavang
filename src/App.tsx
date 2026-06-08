@@ -149,7 +149,7 @@ export default function App() {
               Tôi Yêu Vàng <span className="text-red-500">❤️</span>
             </h1>
             <p className="text-[10px] text-slate-400 font-bold uppercase mt-1 tracking-widest">
-              Biểu Giá Vàng Kim Môn Hải Dương
+              Hello, Trang web này tham khảo giá vàng miễn phí nhé {'<3'}
             </p>
           </div>
         </div>
