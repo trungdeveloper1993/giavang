@@ -16,21 +16,10 @@ import {
   X,
   TrendingUp,
   TrendingDown,
-  Cloud,
   Download,
   Upload,
-  CheckCircle2,
 } from 'lucide-react';
 import { fetchWorldGold } from './lib/clientData';
-import {
-  isCloudKitConfigured,
-  setUpAuth,
-  whenUserSignsIn,
-  whenUserSignsOut,
-  fetchJournal,
-  saveJournal,
-  type CKUser,
-} from './lib/cloudkit';
 
 interface JournalEntry {
   id: string;
@@ -71,13 +60,6 @@ export default function App() {
   const [price, setPrice] = useState('');
   const [editingId, setEditingId] = useState<string | null>(null);
 
-  // CloudKit / iCloud sync state
-  const [ckUser, setCkUser] = useState<CKUser | null>(null);
-  const [ckSyncing, setCkSyncing] = useState(false);
-  const [ckError, setCkError] = useState('');
-  const entriesRef = useRef(entries);
-  entriesRef.current = entries;
-
   const loadData = async (silent = false) => {
     if (!silent) setIsLoading(true);
     else setIsRefreshing(true);
@@ -117,74 +99,6 @@ export default function App() {
     }
   }, [entries]);
 
-  // Khi đăng nhập iCloud thành công: tải nhật ký từ iCloud (hoặc đẩy bản local lên)
-  const onSignedIn = async (user: CKUser) => {
-    setCkUser(user);
-    setCkError('');
-    setCkSyncing(true);
-    try {
-      const remote = await fetchJournal<JournalEntry>();
-      if (remote && remote.length > 0) {
-        setEntries(remote);
-      } else if (entriesRef.current.length > 0) {
-        await saveJournal(entriesRef.current);
-      }
-    } catch (e) {
-      console.warn('iCloud load failed', e);
-      setCkError('Không tải được dữ liệu iCloud.');
-    } finally {
-      setCkSyncing(false);
-    }
-  };
-
-  // Khởi tạo CloudKit + theo dõi đăng nhập/đăng xuất (chỉ khi đã cấu hình)
-  useEffect(() => {
-    if (!isCloudKitConfigured()) return;
-    let active = true;
-
-    const goAuthenticated = (user: CKUser) => {
-      if (!active) return;
-      onSignedIn(user);
-      whenUserSignsOut().then(() => active && goUnauthenticated());
-    };
-    const goUnauthenticated = () => {
-      if (!active) return;
-      setCkUser(null);
-      whenUserSignsIn().then((user) => user && active && goAuthenticated(user));
-    };
-
-    setUpAuth()
-      .then((user) => {
-        if (!active) return;
-        if (user) goAuthenticated(user);
-        else goUnauthenticated();
-      })
-      .catch((e) => {
-        console.warn('CloudKit init failed', e);
-        if (active) setCkError('Không khởi tạo được iCloud.');
-      });
-
-    return () => {
-      active = false;
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  // Tự động lưu lên iCloud mỗi khi nhật ký thay đổi (debounce), nếu đã đăng nhập
-  useEffect(() => {
-    if (!ckUser) return;
-    const t = setTimeout(() => {
-      setCkSyncing(true);
-      saveJournal(entries)
-        .catch((e) => {
-          console.warn('iCloud save failed', e);
-          setCkError('Không lưu được lên iCloud.');
-        })
-        .finally(() => setCkSyncing(false));
-    }, 1200);
-    return () => clearTimeout(t);
-  }, [entries, ckUser]);
-
   // Giá vàng thế giới quy đổi cho 1 chỉ (VND)
   const convertedChiVnd = worldGold
     ? Math.round((worldGold.worldGoldVndLuong / 10) * 1000000)
@@ -219,24 +133,10 @@ export default function App() {
     };
   }, [summary, convertedChiVnd]);
 
-  // Phát hiện thiết bị Apple (iOS / iPadOS / macOS) để bật sao lưu iCloud Drive
-  const isApple = useMemo(() => {
-    if (typeof navigator === 'undefined') return false;
-    const ua = navigator.userAgent || '';
-    const platform = navigator.platform || '';
-    const iOS =
-      /iPad|iPhone|iPod/.test(ua) ||
-      (platform === 'MacIntel' && navigator.maxTouchPoints > 1);
-    const mac = /Mac/.test(platform) || /Mac OS X/.test(ua);
-    return iOS || mac;
-  }, []);
-
-  const cloudKitOn = isCloudKitConfigured();
-
   const restoreInputRef = useRef<HTMLInputElement>(null);
 
-  // Sao lưu nhật ký ra file JSON. Trên iOS/Mac sẽ mở bảng chia sẻ để chọn
-  // "Lưu vào Tệp" → iCloud Drive (sau đó hệ điều hành tự đồng bộ iCloud).
+  // Sao lưu nhật ký ra file JSON. Trên iOS/Mac sẽ mở bảng chia sẻ để chọn nơi
+  // lưu (vd iCloud Drive / Tệp); các nền tảng khác sẽ tải file xuống.
   const handleBackup = async () => {
     const data = JSON.stringify(entries, null, 2);
     const blob = new Blob([data], { type: 'application/json' });
@@ -724,95 +624,47 @@ export default function App() {
           )}
         </motion.div>
 
-        {/* Đồng bộ iCloud — chỉ hiện trên thiết bị Apple (iPhone / iPad / Mac) */}
-        {isApple && (
-          <motion.div
-            initial={{ opacity: 0, y: 10 }}
-            animate={{ opacity: 1, y: 0 }}
-            className="bg-white rounded-3xl border border-slate-200 p-6 shadow-sm flex flex-col gap-4"
-          >
-            <div className="flex items-center justify-between gap-2">
-              <div className="flex items-center gap-2">
-                <Cloud className="w-5 h-5 text-sky-500" />
-                <h3 className="font-extrabold text-slate-900 text-base">
-                  Đồng bộ iCloud
-                </h3>
-              </div>
-              {ckSyncing && (
-                <span className="text-[11px] text-sky-600 font-bold flex items-center gap-1">
-                  <RefreshCw className="w-3.5 h-3.5 animate-spin" /> Đang đồng bộ…
-                </span>
-              )}
-            </div>
-
-            {/* Đăng nhập iCloud vĩnh viễn qua CloudKit (khi đã cấu hình) */}
-            {cloudKitOn ? (
-              <div className="flex flex-col gap-3">
-                {ckUser ? (
-                  <div className="flex items-center justify-between gap-3 bg-emerald-50 border border-emerald-100 rounded-2xl px-4 py-3">
-                    <span className="text-sm font-bold text-emerald-700 flex items-center gap-2">
-                      <CheckCircle2 className="w-4 h-4" /> Đã đăng nhập iCloud — tự
-                      động lưu vĩnh viễn
-                    </span>
-                  </div>
-                ) : (
-                  <p className="text-xs text-slate-600 leading-relaxed bg-sky-50 border border-sky-100 rounded-2xl px-4 py-3">
-                    💡 <strong>Nếu bạn muốn lưu vĩnh viễn</strong> (đồng bộ tự động
-                    trên mọi iPhone / iPad / Mac của bạn) thì hãy{' '}
-                    <strong>đăng nhập bằng Apple ID (iCloud)</strong> ở nút bên dưới.
-                  </p>
-                )}
-                {/* CloudKit tự render nút Đăng nhập / Đăng xuất vào 2 ô này */}
-                <div className="flex items-center gap-3 flex-wrap">
-                  <div id="apple-sign-in-button" className={ckUser ? 'hidden' : ''} />
-                  <div id="apple-sign-out-button" className={ckUser ? '' : 'hidden'} />
-                </div>
-                {ckError && (
-                  <p className="text-[11px] text-rose-600 font-semibold">{ckError}</p>
-                )}
-              </div>
-            ) : (
-              <p className="text-xs text-slate-500 leading-relaxed bg-amber-50 border border-amber-100 rounded-2xl px-4 py-3">
-                💡 <strong>Để lưu vĩnh viễn & tự đồng bộ mọi thiết bị</strong>, cần
-                cấu hình CloudKit (Container ID + API Token trong{' '}
-                <code className="text-amber-700">src/lib/cloudkit.ts</code>). Xem
-                hướng dẫn ở README. Trong lúc đó bạn vẫn có thể sao lưu thủ công bên
-                dưới.
-              </p>
-            )}
-
-            {/* Sao lưu / khôi phục thủ công qua iCloud Drive (luôn có) */}
-            <div className="border-t border-slate-100 pt-4 flex flex-col gap-3">
-              <p className="text-xs text-slate-500 leading-relaxed">
-                Hoặc sao lưu thủ công: nhấn <strong>Sao lưu</strong> rồi chọn{' '}
-                <strong>“Lưu vào Tệp → iCloud Drive”</strong>; khi cần nhấn{' '}
-                <strong>Khôi phục</strong> và chọn lại file đó.
-              </p>
-              <div className="flex items-center gap-3">
-                <button
-                  onClick={handleBackup}
-                  disabled={entries.length === 0}
-                  className="flex-1 flex items-center justify-center gap-2 px-4 py-3 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-sm font-bold transition-all cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
-                >
-                  <Upload className="w-4 h-4" /> Sao lưu
-                </button>
-                <button
-                  onClick={() => restoreInputRef.current?.click()}
-                  className="flex-1 flex items-center justify-center gap-2 px-4 py-3 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-sm font-bold transition-all cursor-pointer"
-                >
-                  <Download className="w-4 h-4" /> Khôi phục
-                </button>
-                <input
-                  ref={restoreInputRef}
-                  type="file"
-                  accept="application/json,.json"
-                  onChange={handleRestore}
-                  className="hidden"
-                />
-              </div>
-            </div>
-          </motion.div>
-        )}
+        {/* Sao lưu / khôi phục dữ liệu (tệp .json) */}
+        <motion.div
+          initial={{ opacity: 0, y: 10 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="bg-white rounded-3xl border border-slate-200 p-6 shadow-sm flex flex-col gap-4"
+        >
+          <div className="flex items-center gap-2">
+            <Upload className="w-5 h-5 text-sky-500" />
+            <h3 className="font-extrabold text-slate-900 text-base">
+              Sao lưu & Khôi phục
+            </h3>
+          </div>
+          <p className="text-xs text-slate-500 leading-relaxed">
+            Nhật ký được lưu sẵn trên trình duyệt này. Nhấn <strong>Sao lưu</strong>{' '}
+            để xuất ra một tệp <code className="text-slate-600">.json</code> (có thể
+            chọn lưu vào Tệp / iCloud Drive / Google Drive…), và{' '}
+            <strong>Khôi phục</strong> để nạp lại tệp đó trên máy khác.
+          </p>
+          <div className="flex items-center gap-3">
+            <button
+              onClick={handleBackup}
+              disabled={entries.length === 0}
+              className="flex-1 flex items-center justify-center gap-2 px-4 py-3 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-sm font-bold transition-all cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+            >
+              <Upload className="w-4 h-4" /> Sao lưu
+            </button>
+            <button
+              onClick={() => restoreInputRef.current?.click()}
+              className="flex-1 flex items-center justify-center gap-2 px-4 py-3 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-sm font-bold transition-all cursor-pointer"
+            >
+              <Download className="w-4 h-4" /> Khôi phục
+            </button>
+            <input
+              ref={restoreInputRef}
+              type="file"
+              accept="application/json,.json"
+              onChange={handleRestore}
+              className="hidden"
+            />
+          </div>
+        </motion.div>
       </main>
 
       {/* Footer */}
