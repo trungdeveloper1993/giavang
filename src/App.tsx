@@ -14,6 +14,8 @@ import {
   Coins,
   BookOpen,
   X,
+  TrendingUp,
+  TrendingDown,
 } from 'lucide-react';
 import { fetchWorldGold } from './lib/clientData';
 
@@ -110,6 +112,24 @@ export default function App() {
     const avgPrice = totalQty > 0 ? totalMoney / totalQty : 0;
     return { totalQty, totalMoney, avgPrice, count: entries.length };
   }, [entries]);
+
+  // Lãi/lỗ tạm tính: so giá vốn trung bình với giá vàng thế giới quy đổi
+  const pnl = useMemo(() => {
+    if (summary.totalQty <= 0 || convertedChiVnd <= 0) return null;
+    const currentValue = summary.totalQty * convertedChiVnd; // giá trị hiện tại
+    const diff = currentValue - summary.totalMoney; // tổng lãi/lỗ
+    const pct =
+      summary.avgPrice > 0
+        ? ((convertedChiVnd - summary.avgPrice) / summary.avgPrice) * 100
+        : 0;
+    return {
+      currentValue,
+      diff,
+      pct,
+      perChi: convertedChiVnd - summary.avgPrice,
+      isProfit: diff >= 0,
+    };
+  }, [summary, convertedChiVnd]);
 
   const resetForm = () => {
     setQty('');
@@ -376,6 +396,85 @@ export default function App() {
           </div>
         </div>
 
+        {/* Lãi / Lỗ tạm tính theo giá vàng thế giới */}
+        {pnl && (
+          <motion.div
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            className={`rounded-3xl border p-6 shadow-sm flex flex-col gap-4 ${
+              pnl.isProfit
+                ? 'bg-emerald-50 border-emerald-200'
+                : 'bg-rose-50 border-rose-200'
+            }`}
+          >
+            <div className="flex items-center justify-between gap-3 flex-wrap">
+              <div>
+                <span
+                  className={`text-[10px] px-2 py-0.5 rounded font-bold uppercase tracking-widest inline-flex items-center gap-1 ${
+                    pnl.isProfit
+                      ? 'bg-emerald-100 text-emerald-700'
+                      : 'bg-rose-100 text-rose-700'
+                  }`}
+                >
+                  {pnl.isProfit ? (
+                    <TrendingUp className="w-3 h-3" />
+                  ) : (
+                    <TrendingDown className="w-3 h-3" />
+                  )}
+                  {pnl.isProfit ? 'Đang Lãi' : 'Đang Lỗ'}
+                </span>
+                <h3 className="text-lg font-extrabold text-slate-800 mt-1">
+                  Chênh Lệch Lãi / Lỗ
+                </h3>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  So giá vốn TB ({fmtVnd(summary.avgPrice)}đ/chỉ) với giá vàng
+                  thế giới quy đổi ({fmtVnd(convertedChiVnd)}đ/chỉ).
+                </p>
+              </div>
+              <div className="text-right">
+                <div
+                  className={`text-3xl font-black font-mono ${
+                    pnl.isProfit ? 'text-emerald-600' : 'text-rose-600'
+                  }`}
+                >
+                  {pnl.isProfit ? '+' : '−'}
+                  {fmtVnd(Math.abs(pnl.diff))}đ
+                </div>
+                <div
+                  className={`text-sm font-bold font-mono ${
+                    pnl.isProfit ? 'text-emerald-600' : 'text-rose-600'
+                  }`}
+                >
+                  {pnl.isProfit ? '+' : '−'}
+                  {Math.abs(pnl.pct).toLocaleString('vi-VN', {
+                    maximumFractionDigits: 2,
+                  })}
+                  %
+                </div>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-3">
+              <div className="bg-white/60 rounded-2xl px-4 py-3 border border-white">
+                <span className="text-[10px] text-slate-400 font-bold uppercase">
+                  Giá trị hiện tại
+                </span>
+                <div className="font-mono font-black text-slate-800 text-base">
+                  {fmtVnd(pnl.currentValue)}đ
+                </div>
+              </div>
+              <div className="bg-white/60 rounded-2xl px-4 py-3 border border-white">
+                <span className="text-[10px] text-slate-400 font-bold uppercase">
+                  Vốn đã bỏ ra
+                </span>
+                <div className="font-mono font-black text-slate-800 text-base">
+                  {fmtVnd(summary.totalMoney)}đ
+                </div>
+              </div>
+            </div>
+          </motion.div>
+        )}
+
         {/* Danh sách nhật ký */}
         <motion.div
           initial={{ opacity: 0, scale: 0.98 }}
@@ -455,6 +554,21 @@ export default function App() {
               </AnimatePresence>
             </ul>
           )}
+        </motion.div>
+
+        {/* Lưu ý giữ dữ liệu */}
+        <motion.div
+          initial={{ opacity: 0, y: 10 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="bg-rose-50 border border-rose-100 rounded-3xl p-5 flex items-start gap-3"
+        >
+          <Heart className="w-5 h-5 text-rose-500 fill-rose-500 shrink-0 mt-0.5" />
+          <p className="text-xs text-rose-700 leading-relaxed">
+            <strong>Lưu ý nhỏ nè ❤️</strong> Nhật ký được lưu ngay trên trình duyệt
+            của bạn. Vì vậy <strong>đừng xóa dữ liệu duyệt web</strong> (lịch sử /
+            cache) và lưu ý khi <strong>đổi máy hoặc đổi trình duyệt</strong> — nếu
+            không bạn có thể bị mất toàn bộ nhật ký đã ghi. Hãy giữ gìn cẩn thận nha!
+          </p>
         </motion.div>
       </main>
 
