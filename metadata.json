@@ -1,0 +1,6 @@
+{
+  "name": "Giá Vàng Kim Môn Hôm Nay",
+  "description": "Ứng dụng tra cứu và cập nhật giá vàng Kim Môn Hải Dương và giá vàng trong nước hôm nay với biểu đồ biến động thời gian thực, giao diện hiện đại, tối ưu tốc độ và hỗ trợ đa cấu hình.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
