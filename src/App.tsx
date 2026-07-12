@@ -16,6 +16,8 @@ import {
   X,
   TrendingUp,
   TrendingDown,
+  Eye,
+  EyeOff,
 } from 'lucide-react';
 import { fetchWorldGold } from './lib/clientData';
 
@@ -28,6 +30,8 @@ interface JournalEntry {
 }
 
 const STORAGE_KEY = 'gold-purchase-journal';
+const HIDE_KEY = 'gold-hide-amounts';
+const MASK = '••••••';
 
 const fmtVnd = (n: number) => Math.round(n).toLocaleString('vi-VN');
 const fmtQty = (n: number) =>
@@ -57,6 +61,18 @@ export default function App() {
   const [qty, setQty] = useState('');
   const [price, setPrice] = useState('');
   const [editingId, setEditingId] = useState<string | null>(null);
+
+  // Ẩn/hiện số lượng vàng & số tiền đang có (lưu trên trình duyệt)
+  const [hideAmounts, setHideAmounts] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem(HIDE_KEY) === '1';
+    } catch {
+      return false;
+    }
+  });
+
+  // Che số nhạy cảm khi đang ở chế độ ẩn
+  const mask = (value: string) => (hideAmounts ? MASK : value);
 
   const loadData = async (silent = false) => {
     if (!silent) setIsLoading(true);
@@ -96,6 +112,15 @@ export default function App() {
       /* ignore quota errors */
     }
   }, [entries]);
+
+  // Ghi nhớ trạng thái ẩn/hiện
+  useEffect(() => {
+    try {
+      localStorage.setItem(HIDE_KEY, hideAmounts ? '1' : '0');
+    } catch {
+      /* ignore quota errors */
+    }
+  }, [hideAmounts]);
 
   // Giá vàng thế giới quy đổi cho 1 chỉ (VND)
   const convertedChiVnd = worldGold
@@ -217,19 +242,41 @@ export default function App() {
           </div>
         </div>
 
-        <button
-          onClick={() => loadData()}
-          disabled={isLoading || isRefreshing}
-          className="flex items-center gap-2 px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold transition-all border border-slate-200 cursor-pointer disabled:opacity-50"
-          title="Cập nhật giá vàng thế giới"
-        >
-          <RefreshCw
-            className={`w-4 h-4 ${
-              isLoading || isRefreshing ? 'animate-spin text-red-500' : ''
-            }`}
-          />
-          <span>Làm mới</span>
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => setHideAmounts((v) => !v)}
+            className="flex items-center gap-2 px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold transition-all border border-slate-200 cursor-pointer"
+            title={
+              hideAmounts
+                ? 'Hiện số lượng vàng & số tiền'
+                : 'Ẩn số lượng vàng & số tiền'
+            }
+            aria-pressed={hideAmounts}
+          >
+            {hideAmounts ? (
+              <EyeOff className="w-4 h-4" />
+            ) : (
+              <Eye className="w-4 h-4" />
+            )}
+            <span className="hidden sm:inline">
+              {hideAmounts ? 'Hiện số' : 'Ẩn số'}
+            </span>
+          </button>
+
+          <button
+            onClick={() => loadData()}
+            disabled={isLoading || isRefreshing}
+            className="flex items-center gap-2 px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold transition-all border border-slate-200 cursor-pointer disabled:opacity-50"
+            title="Cập nhật giá vàng thế giới"
+          >
+            <RefreshCw
+              className={`w-4 h-4 ${
+                isLoading || isRefreshing ? 'animate-spin text-red-500' : ''
+              }`}
+            />
+            <span className="hidden sm:inline">Làm mới</span>
+          </button>
+        </div>
       </header>
 
       {/* Main Content Area */}
@@ -367,7 +414,7 @@ export default function App() {
               <Scale className="w-3.5 h-3.5 text-amber-500" /> Tổng số lượng
             </span>
             <span className="text-2xl font-black font-mono text-slate-900">
-              {fmtQty(summary.totalQty)}{' '}
+              {mask(fmtQty(summary.totalQty))}{' '}
               <span className="text-sm font-bold text-slate-400">chỉ</span>
             </span>
             <span className="text-[11px] text-slate-400">
@@ -380,7 +427,7 @@ export default function App() {
               <Coins className="w-3.5 h-3.5 text-amber-500" /> Giá vốn TB
             </span>
             <span className="text-2xl font-black font-mono text-slate-900">
-              {fmtVnd(summary.avgPrice)}
+              {mask(fmtVnd(summary.avgPrice))}
             </span>
             <span className="text-[11px] text-slate-400">đồng / chỉ</span>
           </div>
@@ -390,7 +437,7 @@ export default function App() {
               <Wallet className="w-3.5 h-3.5" /> Tổng tiền đã mua
             </span>
             <span className="text-2xl font-black font-mono">
-              {fmtVnd(summary.totalMoney)}
+              {mask(fmtVnd(summary.totalMoney))}
             </span>
             <span className="text-[11px] text-red-100">đồng</span>
           </div>
@@ -437,8 +484,11 @@ export default function App() {
                     pnl.isProfit ? 'text-emerald-600' : 'text-rose-600'
                   }`}
                 >
-                  {pnl.isProfit ? '+' : '−'}
-                  {fmtVnd(Math.abs(pnl.diff))}đ
+                  {hideAmounts
+                    ? MASK
+                    : `${pnl.isProfit ? '+' : '−'}${fmtVnd(
+                        Math.abs(pnl.diff)
+                      )}đ`}
                 </div>
                 <div
                   className={`text-sm font-bold font-mono ${
@@ -460,7 +510,7 @@ export default function App() {
                   Giá trị hiện tại
                 </span>
                 <div className="font-mono font-black text-slate-800 text-base">
-                  {fmtVnd(pnl.currentValue)}đ
+                  {mask(fmtVnd(pnl.currentValue))}đ
                 </div>
               </div>
               <div className="bg-white/60 rounded-2xl px-4 py-3 border border-white">
@@ -468,7 +518,7 @@ export default function App() {
                   Vốn đã bỏ ra
                 </span>
                 <div className="font-mono font-black text-slate-800 text-base">
-                  {fmtVnd(summary.totalMoney)}đ
+                  {mask(fmtVnd(summary.totalMoney))}đ
                 </div>
               </div>
             </div>
@@ -518,11 +568,11 @@ export default function App() {
                     <div className="min-w-0">
                       <div className="flex items-center gap-2 flex-wrap">
                         <span className="font-mono font-black text-slate-900 text-base">
-                          {fmtQty(entry.quantity)} chỉ
+                          {mask(fmtQty(entry.quantity))} chỉ
                         </span>
                         <span className="text-slate-300">×</span>
                         <span className="font-mono font-bold text-slate-600 text-sm">
-                          {fmtVnd(entry.price)}đ
+                          {mask(fmtVnd(entry.price))}đ
                         </span>
                       </div>
                       <div className="text-[11px] text-slate-400 mt-0.5 flex items-center gap-1.5">
@@ -532,7 +582,7 @@ export default function App() {
 
                     <div className="flex items-center gap-3 shrink-0">
                       <span className="font-mono font-black text-amber-700 text-base whitespace-nowrap">
-                        {fmtVnd(entry.quantity * entry.price)}đ
+                        {mask(fmtVnd(entry.quantity * entry.price))}đ
                       </span>
                       <button
                         onClick={() => handleEdit(entry)}
